@@ -1,6 +1,3 @@
-import { promises as fs } from "fs";
-import path from "path";
-
 export type WaitlistEntry = {
   email: string;
   platform?: string;
@@ -8,27 +5,14 @@ export type WaitlistEntry = {
   createdAt: string;
 };
 
-const DATA_PATH = path.join(process.cwd(), "data", "waitlist.json");
+type GlobalWaitlist = typeof globalThis & {
+  __hooklineWaitlist?: Map<string, WaitlistEntry>;
+};
 
-async function ensureFile(): Promise<void> {
-  const dir = path.dirname(DATA_PATH);
-  await fs.mkdir(dir, { recursive: true });
-  try {
-    await fs.access(DATA_PATH);
-  } catch {
-    await fs.writeFile(DATA_PATH, "[]", "utf8");
-  }
-}
-
-export async function readWaitlist(): Promise<WaitlistEntry[]> {
-  await ensureFile();
-  const raw = await fs.readFile(DATA_PATH, "utf8");
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
+function store(): Map<string, WaitlistEntry> {
+  const g = globalThis as GlobalWaitlist;
+  if (!g.__hooklineWaitlist) g.__hooklineWaitlist = new Map();
+  return g.__hooklineWaitlist;
 }
 
 export async function addWaitlistEntry(
@@ -45,18 +29,19 @@ export async function addWaitlistEntry(
     return { ok: false, error: "Invalid platform." };
   }
 
-  const list = await readWaitlist();
-  if (list.some((e) => e.email === email)) {
+  const list = store();
+  if (list.has(email)) {
     return { ok: true, duplicate: true };
   }
 
-  list.push({
+  const row: WaitlistEntry = {
     email,
     platform: platform || undefined,
     source: entry.source?.trim() || undefined,
     createdAt: new Date().toISOString(),
-  });
-
-  await fs.writeFile(DATA_PATH, JSON.stringify(list, null, 2), "utf8");
+  };
+  list.set(email, row);
+  // Serverless-safe capture for MVP; swap to KV/DB when Prize adds one.
+  console.log("[hookline-waitlist]", JSON.stringify(row));
   return { ok: true, duplicate: false };
 }
